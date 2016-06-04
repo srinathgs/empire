@@ -4,10 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/gorilla/mux"
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/heroku"
-	"github.com/remind101/pkg/httpx"
-	"golang.org/x/net/context"
 )
 
 type Release heroku.Release
@@ -36,17 +35,8 @@ func newReleases(rs []*empire.Release) []*Release {
 	return releases
 }
 
-type GetRelease struct {
-	*empire.Empire
-}
-
-func (h *GetRelease) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
-
-	vars := httpx.Vars(ctx)
+func (h *API) GetRelease(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	vars := mux.Vars(r)
 	vers, err := strconv.Atoi(vars["version"])
 	if err != nil {
 		return err
@@ -61,16 +51,7 @@ func (h *GetRelease) ServeHTTPContext(ctx context.Context, w http.ResponseWriter
 	return Encode(w, newRelease(rel))
 }
 
-type GetReleases struct {
-	*empire.Empire
-}
-
-func (h *GetReleases) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
-
+func (h *API) GetReleases(a *empire.App, w http.ResponseWriter, r *http.Request) error {
 	rangeHeader, err := RangeHeader(r)
 	if err != nil {
 		return err
@@ -83,10 +64,6 @@ func (h *GetReleases) ServeHTTPContext(ctx context.Context, w http.ResponseWrite
 
 	w.WriteHeader(200)
 	return Encode(w, newReleases(rels))
-}
-
-type PostReleases struct {
-	*empire.Empire
 }
 
 type PostReleasesForm struct {
@@ -102,7 +79,9 @@ func (p *PostReleasesForm) ReleaseVersion() (int, error) {
 	return vers, nil
 }
 
-func (h *PostReleases) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *API) PostReleases(app *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+
 	var form PostReleasesForm
 
 	if err := Decode(r, &form); err != nil {
@@ -110,11 +89,6 @@ func (h *PostReleases) ServeHTTPContext(ctx context.Context, w http.ResponseWrit
 	}
 
 	version, err := form.ReleaseVersion()
-	if err != nil {
-		return err
-	}
-
-	app, err := findApp(ctx, h)
 	if err != nil {
 		return err
 	}

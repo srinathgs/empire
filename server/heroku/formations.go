@@ -5,14 +5,9 @@ import (
 
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/heroku"
-	"golang.org/x/net/context"
 )
 
 type Formation heroku.Formation
-
-type PatchFormation struct {
-	*empire.Empire
-}
 
 type PatchFormationForm struct {
 	Updates []struct {
@@ -22,15 +17,12 @@ type PatchFormationForm struct {
 	} `json:"updates"`
 }
 
-func (h *PatchFormation) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *API) PatchFormation(app *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
+
 	var form PatchFormationForm
 
 	if err := Decode(r, &form); err != nil {
-		return err
-	}
-
-	app, err := findApp(ctx, h)
-	if err != nil {
 		return err
 	}
 
@@ -64,17 +56,9 @@ func (h *PatchFormation) ServeHTTPContext(ctx context.Context, w http.ResponseWr
 	return Encode(w, resp)
 }
 
-// GetFormation returns the current Formation info for an App
-type GetFormation struct {
-	*empire.Empire
-}
-
 // ServeHTTPContext handles the http response
-func (h *GetFormation) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	app, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) GetFormation(app *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	formation, err := h.ListScale(ctx, app)
 	if err != nil {

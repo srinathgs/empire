@@ -3,82 +3,139 @@ package heroku
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 
 	"golang.org/x/net/context"
 
+	"github.com/gorilla/mux"
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/headerutil"
 	"github.com/remind101/empire/pkg/heroku"
 	"github.com/remind101/empire/server/auth"
-	"github.com/remind101/pkg/httpx"
-	"github.com/remind101/pkg/httpx/middleware"
+	"github.com/remind101/pkg/reporter"
 )
 
 // The Accept header that controls the api version. See
 // https://devcenter.heroku.com/articles/platform-api-reference#clients
 const AcceptHeader = "application/vnd.heroku+json; version=3"
 
-// New creates the API routes and returns a new http.Handler to serve them.
-func New(e *empire.Empire, authenticator auth.Authenticator) httpx.Handler {
-	r := httpx.NewRouter()
+// API is an http.Handler for the Heroku compatible API of Empire.
+type API struct {
+	// Authenticator is an auth.Authenticator that will be used to
+	// authenticate requests.
+	Authenticator auth.Authenticator
 
+	// HandleError is a function that will be called to handle errors
+	// returned from handlers.
+	handleError func(error, http.ResponseWriter, *http.Request)
+
+	*empire.Empire
+
+	once sync.Once
+	mux  *mux.Router
+}
+
+// New creates the API routes and returns a new http.Handler to serve them.
+func New(e *empire.Empire) *API {
+	return &API{
+		Empire: e,
+		mux:    mux.NewRouter(),
+		handleError: func(err error, w http.ResponseWriter, r *http.Request) {
+			Error(w, err, http.StatusInternalServerError)
+		},
+	}
+}
+
+// setup sets up all of the routes.
+func (a *API) setup() {
 	// Apps
-	r.Handle("/apps", &GetApps{e}).Methods("GET")                  // hk apps
-	r.Handle("/apps/{app}", &GetAppInfo{e}).Methods("GET")         // hk info
-	r.Handle("/apps/{app}", &DeleteApp{e}).Methods("DELETE")       // hk destroy
-	r.Handle("/apps/{app}", &PatchApp{e}).Methods("PATCH")         // hk destroy
-	r.Handle("/apps/{app}/deploys", &DeployApp{e}).Methods("POST") // Deploy an image to an app
-	r.Handle("/apps", &PostApps{e}).Methods("POST")                // hk create
-	r.Handle("/organizations/apps", &PostApps{e}).Methods("POST")  // hk create
+	a.handle("/apps", a.GetApps).Methods("GET")
+	a.handle("/apps/{app}", a.withApp(a.GetAppInfo)).Methods("GET")
+	a.handle("/apps/{app}", a.withApp(a.DeleteApp)).Methods("DELETE")
+	a.handle("/apps/{app}", a.withApp(a.PatchApp)).Methods("PATCH")
+	a.handle("/apps/{app}/deploys", a.withApp(a.DeployApp)).Methods("POST")
+	a.handle("/apps", a.PostApps).Methods("POST")
+	a.handle("/organizations/apps", a.PostApps).Methods("POST")
 
 	// Domains
-	r.Handle("/apps/{app}/domains", &GetDomains{e}).Methods("GET")                 // hk domains
-	r.Handle("/apps/{app}/domains", &PostDomains{e}).Methods("POST")               // hk domain-add
-	r.Handle("/apps/{app}/domains/{hostname}", &DeleteDomain{e}).Methods("DELETE") // hk domain-remove
+	a.handle("/apps/{app}/domains", a.withApp(a.GetDomains)).Methods("GET")
+	a.handle("/apps/{app}/domains", a.withApp(a.PostDomains)).Methods("POST")
+	a.handle("/apps/{app}/domains/{hostname}", a.withApp(a.DeleteDomain)).Methods("DELETE")
 
 	// Deploys
-	r.Handle("/deploys", &PostDeploys{e}).Methods("POST") // Deploy an app
+	a.handle("/deploys", a.PostDeploys).Methods("POST")
 
 	// Releases
-	r.Handle("/apps/{app}/releases", &GetReleases{e}).Methods("GET")          // hk releases
-	r.Handle("/apps/{app}/releases/{version}", &GetRelease{e}).Methods("GET") // hk release-info
-	r.Handle("/apps/{app}/releases", &PostReleases{e}).Methods("POST")        // hk rollback
+	a.handle("/apps/{app}/releases", a.withApp(a.GetReleases)).Methods("GET")
+	a.handle("/apps/{app}/releases/{version}", a.withApp(a.GetRelease)).Methods("GET")
+	a.handle("/apps/{app}/releases", a.withApp(a.PostReleases)).Methods("POST")
 
 	// Configs
-	r.Handle("/apps/{app}/config-vars", &GetConfigs{e}).Methods("GET")     // hk env, hk get
-	r.Handle("/apps/{app}/config-vars", &PatchConfigs{e}).Methods("PATCH") // hk set, hk unset
+	a.handle("/apps/{app}/config-vars", a.withApp(a.GetConfigs)).Methods("GET")
+	a.handle("/apps/{app}/config-vars", a.withApp(a.PatchConfigs)).Methods("PATCH")
 
 	// Processes
-	r.Handle("/apps/{app}/dynos", &GetProcesses{e}).Methods("GET")                     // hk dynos
-	r.Handle("/apps/{app}/dynos", &PostProcess{e}).Methods("POST")                     // hk run
-	r.Handle("/apps/{app}/dynos", &DeleteProcesses{e}).Methods("DELETE")               // hk restart
-	r.Handle("/apps/{app}/dynos/{ptype}.{pid}", &DeleteProcesses{e}).Methods("DELETE") // hk restart web.1
-	r.Handle("/apps/{app}/dynos/{pid}", &DeleteProcesses{e}).Methods("DELETE")         // hk restart web
+	a.handle("/apps/{app}/dynos", a.withApp(a.GetProcesses)).Methods("GET")
+	a.handle("/apps/{app}/dynos", a.withApp(a.PostProcess)).Methods("POST")
+	a.handle("/apps/{app}/dynos", a.withApp(a.DeleteProcesses)).Methods("DELETE")
+	a.handle("/apps/{app}/dynos/{ptype}.{pid}", a.withApp(a.DeleteProcesses)).Methods("DELETE")
+	a.handle("/apps/{app}/dynos/{pid}", a.withApp(a.DeleteProcesses)).Methods("DELETE")
 
 	// Formations
-	r.Handle("/apps/{app}/formation", &GetFormation{e}).Methods("GET")     // hk scale -l
-	r.Handle("/apps/{app}/formation", &PatchFormation{e}).Methods("PATCH") // hk scale
+	a.handle("/apps/{app}/formation", a.withApp(a.GetFormation)).Methods("GET")
+	a.handle("/apps/{app}/formation", a.withApp(a.PatchFormation)).Methods("PATCH")
 
 	// OAuth
-	r.Handle("/oauth/authorizations", &PostAuthorizations{e}).Methods("POST")
+	a.handle("/oauth/authorizations", a.PostAuthorizations).Methods("POST")
 
 	// SSL
-	sslRemoved := errHandler(ErrSSLRemoved)
-	r.Handle("/apps/{app}/ssl-endpoints", sslRemoved).Methods("GET")           // hk ssl
-	r.Handle("/apps/{app}/ssl-endpoints", sslRemoved).Methods("POST")          // hk ssl-cert-add
-	r.Handle("/apps/{app}/ssl-endpoints/{cert}", sslRemoved).Methods("PATCH")  // hk ssl-cert-add, hk ssl-cert-rollback
-	r.Handle("/apps/{app}/ssl-endpoints/{cert}", sslRemoved).Methods("DELETE") // hk ssl-destroy
+	sslRemoved := func(w http.ResponseWriter, r *http.Request) error {
+		return ErrSSLRemoved
+	}
+	a.handle("/apps/{app}/ssl-endpoints", sslRemoved).Methods("GET")
+	a.handle("/apps/{app}/ssl-endpoints", sslRemoved).Methods("POST")
+	a.handle("/apps/{app}/ssl-endpoints/{cert}", sslRemoved).Methods("PATCH")
+	a.handle("/apps/{app}/ssl-endpoints/{cert}", sslRemoved).Methods("DELETE")
 
 	// Logs
-	r.Handle("/apps/{app}/log-sessions", &PostLogs{e}).Methods("POST") // hk log
+	a.handle("/apps/{app}/log-sessions", a.withApp(a.PostLogs)).Methods("POST")
+}
 
-	errorHandler := func(err error, w http.ResponseWriter, r *http.Request) {
-		Error(w, err, http.StatusInternalServerError)
+// Adds a route. h is wrapped with authentication.
+func (a *API) handle(path string, h func(w http.ResponseWriter, r *http.Request) error) *mux.Route {
+	return a.mux.Handle(path, a.handler(a.authenticate(h)))
+}
+
+func (a *API) withApp(h func(app *empire.App, w http.ResponseWriter, r *http.Request) error) func(w http.ResponseWriter, r *http.Request) error {
+	return func(w http.ResponseWriter, r *http.Request) error {
+		vars := mux.Vars(r)
+		name := vars["app"]
+
+		app, err := a.AppsFind(empire.AppsQuery{Name: &name})
+		if err != nil {
+			return err
+		}
+		reporter.AddContext(r.Context(), "app", app.Name)
+		return h(app, w, r)
+	}
+}
+
+// handler returns an http.Handler that calls h. If an error is returned, it
+// uses the HandleError method to render the error.
+func (a *API) handler(h func(w http.ResponseWriter, r *http.Request) error) http.Handler {
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		if err := h(w, r); err != nil {
+			a.handleError(err, w, r)
+			return
+		}
 	}
 
-	api := Authenticate(r, authenticator)
+	return http.HandlerFunc(handler)
+}
 
-	return middleware.HandleError(api, errorHandler)
+func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	a.once.Do(a.setup)
+	a.mux.ServeHTTP(w, r)
 }
 
 // Encode json encodes v into w.

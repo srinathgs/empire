@@ -5,9 +5,6 @@ import (
 
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/heroku"
-	"github.com/remind101/pkg/httpx"
-	"github.com/remind101/pkg/reporter"
-	"golang.org/x/net/context"
 )
 
 type App heroku.App
@@ -31,11 +28,7 @@ func newApps(as []*empire.App) []*App {
 	return apps
 }
 
-type GetApps struct {
-	*empire.Empire
-}
-
-func (h *GetApps) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *API) GetApps(w http.ResponseWriter, r *http.Request) error {
 	apps, err := h.Apps(empire.AppsQuery{})
 	if err != nil {
 		return err
@@ -45,29 +38,13 @@ func (h *GetApps) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r
 	return Encode(w, newApps(apps))
 }
 
-type GetAppInfo struct {
-	*empire.Empire
-}
-
-func (h *GetAppInfo) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
-
+func (h *API) GetAppInfo(a *empire.App, w http.ResponseWriter, r *http.Request) error {
 	w.WriteHeader(200)
 	return Encode(w, newApp(a))
 }
 
-type DeleteApp struct {
-	*empire.Empire
-}
-
-func (h *DeleteApp) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) DeleteApp(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	m, err := findMessage(r)
 	if err != nil {
@@ -85,15 +62,8 @@ func (h *DeleteApp) ServeHTTPContext(ctx context.Context, w http.ResponseWriter,
 	return NoContent(w)
 }
 
-type DeployApp struct {
-	*empire.Empire
-}
-
-func (h *DeployApp) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) DeployApp(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	opts, err := newDeploymentsCreateOpts(ctx, w, r)
 	opts.App = a
@@ -108,11 +78,9 @@ type PostAppsForm struct {
 	Name string `json:"name"`
 }
 
-type PostApps struct {
-	*empire.Empire
-}
+func (h *API) PostApps(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
-func (h *PostApps) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	var form PostAppsForm
 
 	if err := Decode(r, &form); err != nil {
@@ -137,15 +105,8 @@ func (h *PostApps) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, 
 	return Encode(w, newApp(a))
 }
 
-type PatchApp struct {
-	*empire.Empire
-}
-
-func (h *PatchApp) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) PatchApp(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	var form heroku.AppUpdateOpts
 
@@ -160,15 +121,4 @@ func (h *PatchApp) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, 
 	}
 
 	return Encode(w, newApp(a))
-}
-
-func findApp(ctx context.Context, e interface {
-	AppsFind(empire.AppsQuery) (*empire.App, error)
-}) (*empire.App, error) {
-	vars := httpx.Vars(ctx)
-	name := vars["app"]
-
-	a, err := e.AppsFind(empire.AppsQuery{Name: &name})
-	reporter.AddContext(ctx, "app", a.Name)
-	return a, err
 }

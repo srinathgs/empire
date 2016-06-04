@@ -4,11 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/heroku"
-	"github.com/remind101/pkg/httpx"
-	"golang.org/x/net/context"
 )
 
 type Domain heroku.Domain
@@ -21,16 +20,7 @@ func newDomain(d *empire.Domain) *Domain {
 	}
 }
 
-type GetDomains struct {
-	*empire.Empire
-}
-
-func (h *GetDomains) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
-
+func (h *API) GetDomains(a *empire.App, w http.ResponseWriter, r *http.Request) error {
 	d, err := h.Domains(empire.DomainsQuery{App: a})
 	if err != nil {
 		return err
@@ -44,15 +34,8 @@ type PostDomainsForm struct {
 	Hostname string `json:"hostname"`
 }
 
-type PostDomains struct {
-	*empire.Empire
-}
-
-func (h *PostDomains) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) PostDomains(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	var form PostDomainsForm
 
@@ -78,17 +61,10 @@ func (h *PostDomains) ServeHTTPContext(ctx context.Context, w http.ResponseWrite
 	return Encode(w, newDomain(d))
 }
 
-type DeleteDomain struct {
-	*empire.Empire
-}
+func (h *API) DeleteDomain(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
-func (h *DeleteDomain) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
-
-	vars := httpx.Vars(ctx)
+	vars := mux.Vars(r)
 	name := vars["hostname"]
 
 	d, err := h.DomainsFind(empire.DomainsQuery{Hostname: &name, App: a})

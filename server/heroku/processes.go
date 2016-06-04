@@ -5,13 +5,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/pkg/heroku"
 	"github.com/remind101/empire/pkg/hijack"
 	streamhttp "github.com/remind101/empire/pkg/stream/http"
-	"github.com/remind101/pkg/httpx"
 	"github.com/remind101/pkg/timex"
-	"golang.org/x/net/context"
 )
 
 type Dyno heroku.Dyno
@@ -37,15 +36,8 @@ func newDynos(tasks []*empire.Task) []*Dyno {
 	return dynos
 }
 
-type GetProcesses struct {
-	*empire.Empire
-}
-
-func (h *GetProcesses) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
+func (h *API) GetProcesses(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
 	// Retrieve tasks
 	js, err := h.Tasks(ctx, a)
@@ -64,17 +56,10 @@ type PostProcessForm struct {
 	Size    *empire.Constraints `json:"size"`
 }
 
-type PostProcess struct {
-	*empire.Empire
-}
+func (h *API) PostProcess(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
-func (h *PostProcess) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	var form PostProcessForm
-
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
-	}
 
 	m, err := findMessage(r)
 	if err != nil {
@@ -138,21 +123,14 @@ func (h *PostProcess) ServeHTTPContext(ctx context.Context, w http.ResponseWrite
 	return nil
 }
 
-type DeleteProcesses struct {
-	*empire.Empire
-}
+func (h *API) DeleteProcesses(a *empire.App, w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
-func (h *DeleteProcesses) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
-	vars := httpx.Vars(ctx)
+	vars := mux.Vars(r)
 	pid := vars["pid"]
 
 	if vars["ptype"] != "" {
 		return errNotImplemented("Restarting a process type is currently not implemented.")
-	}
-
-	a, err := findApp(ctx, h)
-	if err != nil {
-		return err
 	}
 
 	m, err := findMessage(r)

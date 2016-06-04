@@ -3,9 +3,8 @@ package heroku
 import (
 	"net/http"
 
-	"github.com/remind101/empire/pkg/heroku"
 	"github.com/remind101/empire"
-	"golang.org/x/net/context"
+	"github.com/remind101/empire/pkg/heroku"
 )
 
 const (
@@ -26,11 +25,9 @@ func newAuthorization(token *empire.AccessToken) *Authorization {
 	}
 }
 
-type PostAuthorizations struct {
-	*empire.Empire
-}
+func (h *API) PostAuthorizations(w http.ResponseWriter, r *http.Request) error {
+	ctx := r.Context()
 
-func (h *PostAuthorizations) ServeHTTPContext(ctx context.Context, w http.ResponseWriter, r *http.Request) error {
 	at, err := h.Empire.AccessTokensCreate(&empire.AccessToken{
 		User: UserFromContext(ctx),
 	})

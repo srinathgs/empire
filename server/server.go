@@ -3,13 +3,11 @@ package server
 import (
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/remind101/empire"
 	"github.com/remind101/empire/server/auth"
 	"github.com/remind101/empire/server/github"
 	"github.com/remind101/empire/server/heroku"
-	"github.com/remind101/empire/server/middleware"
-	"github.com/remind101/pkg/httpx"
-	"golang.org/x/net/context"
 )
 
 var (
@@ -33,7 +31,7 @@ type Options struct {
 }
 
 func New(e *empire.Empire, options Options) http.Handler {
-	r := httpx.NewRouter()
+	r := mux.NewRouter()
 
 	if options.GitHub.Webhooks.Secret != "" {
 		// Mount GitHub webhooks
@@ -42,25 +40,23 @@ func New(e *empire.Empire, options Options) http.Handler {
 			Environments: options.GitHub.Deployments.Environments,
 			Deployer:     newDeployer(e, options),
 		})
-		r.Match(githubWebhook, g)
+		r.MatcherFunc(githubWebhook).Handler(g)
 	}
 
 	// Mount the heroku api
-	h := heroku.New(e, options.Authenticator)
+	h := heroku.New(e)
+	h.Authenticator = options.Authenticator
 	r.Headers("Accept", heroku.AcceptHeader).Handler(h)
 
 	// Mount health endpoint
 	r.Handle("/health", NewHealthHandler(e))
 
-	return middleware.Common(r, middleware.CommonOpts{
-		Reporter: e.Reporter,
-		Logger:   e.Logger,
-	})
+	return r
 }
 
 // githubWebhook is a MatcherFunc that matches requests that have an
 // `X-GitHub-Event` header present.
-func githubWebhook(r *http.Request) bool {
+func githubWebhook(r *http.Request, _ *mux.RouteMatch) bool {
 	h := r.Header[http.CanonicalHeaderKey("X-GitHub-Event")]
 	return len(h) > 0
 }
@@ -79,7 +75,7 @@ func NewHealthHandler(e *empire.Empire) *HealthHandler {
 	}
 }
 
-func (h *HealthHandler) ServeHTTPContext(_ context.Context, w http.ResponseWriter, r *http.Request) error {
+func (h *HealthHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var status = http.StatusOK
 
 	if !h.IsHealthy() {
@@ -88,7 +84,7 @@ func (h *HealthHandler) ServeHTTPContext(_ context.Context, w http.ResponseWrite
 
 	w.WriteHeader(status)
 
-	return nil
+	return
 }
 
 // newDeployer generates a new github.Deployer implementation for the given
